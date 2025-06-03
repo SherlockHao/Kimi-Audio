@@ -23,15 +23,24 @@ def extract_audio_info(conversation):
     
     return audio_path, groundtruth
 
-def main():
+def main(model_pretrained=True):
     # 模型路径和参数配置
-    model_path = "output/finetuned_hf_for_inference"
+    if model_pretrained:
+        model_path = "moonshotai/Kimi-Audio-7B"
+    else:
+        model_path = "output/finetuned_hf_for_inference"
     jsonl_path = "finetune_codes/demo_data/audio_understanding/asr_sft_data.jsonl"
     output_file = "batch_inference_results.json"
     
     # 只加载一次模型
-    print(f"Loading model from {model_path}...")
-    model = KimiAudio(model_path=model_path, load_detokenizer=False)
+    if model_pretrained:
+        model = KimiAudio(
+            model_path=model_path,
+            load_detokenizer=True,
+        )
+    else:
+        print(f"Loading model from {model_path}...")
+        model = KimiAudio(model_path=model_path, load_detokenizer=False)
     print("Model loaded successfully!")
     
     # 采样参数
@@ -76,7 +85,7 @@ def main():
         try:
             # 构建消息格式
             messages = [
-                {"role": "user", "message_type": "text", "content": "请将音频内容转换为文字。"},
+                {"role": "user", "message_type": "text", "content": "请将音频内容转换为文字, 并返回纯文本, 不要包含任何其他内容。"},
                 {"role": "user", "message_type": "audio", "content": audio_path},
             ]
             
@@ -138,4 +147,4 @@ def main():
     print("\nBatch inference completed!")
 
 if __name__ == "__main__":
-    main()
+    main(True)
