@@ -18,8 +18,8 @@ def extract_audio_info(conversation):
     audio_path = None
     groundtruth = None
     
-    audio_path = conversation['conversation'][1]['content']
-    groundtruth = conversation['conversation'][2]['content']
+    audio_path = conversation[1]['content']
+    groundtruth = conversation[2]['content']
     
     return audio_path, groundtruth
 
