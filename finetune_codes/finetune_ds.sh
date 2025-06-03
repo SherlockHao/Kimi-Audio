@@ -96,7 +96,6 @@ torchrun $DISTRIBUTED_ARGS finetune.py \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 8 \
-    --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 200 \
     --save_total_limit 10 \
