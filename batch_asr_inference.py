@@ -26,7 +26,7 @@ def extract_audio_info(conversation):
 def main(model_pretrained=True):
     # 模型路径和参数配置
     if model_pretrained:
-        model_path = "moonshotai/Kimi-Audio-7B"
+        model_path = "moonshotai/Kimi-Audio-7B-Instruct"
     else:
         model_path = "output/finetuned_hf_for_inference"
     jsonl_path = "finetune_codes/demo_data/audio_understanding/asr_sft_data.jsonl"
@@ -85,7 +85,7 @@ def main(model_pretrained=True):
         try:
             # 构建消息格式
             messages = [
-                {"role": "user", "message_type": "text", "content": "请将音频内容转换为文字, 并返回纯文本, 不要包含任何其他内容。"},
+                {"role": "user", "message_type": "text", "content": "请将音频内容转换为文字。"},
                 {"role": "user", "message_type": "audio", "content": audio_path},
             ]
             
