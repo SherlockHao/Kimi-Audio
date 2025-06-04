@@ -5,6 +5,7 @@ from tqdm import tqdm
 import time
 from multiprocessing import Pool, Manager, Queue, Process
 import torch
+import threading
 from queue import Empty
 
 def load_jsonl_data(jsonl_path):
@@ -21,15 +22,108 @@ def extract_audio_info(conversation):
     audio_path = None
     groundtruth = None
     
-    for message in conversation:
-        if message['role'] == 'user' and message['message_type'] == 'audio':
-            audio_path = message['content']
-        elif message['role'] == 'assistant' and message['message_type'] == 'text':
-            groundtruth = message['content']
+    audio_path = conversation[1]['content']
+    groundtruth = conversation[2]['content']
     
     return audio_path, groundtruth
 
+def worker_process(gpu_id, task_queue, result_queue, model_path, model_pretrained, sampling_params):
+    """工作进程：从队列中获取任务并处理"""
+    # 设置当前进程使用的GPU
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+    
+    # 加载模型
+    print(f"GPU {gpu_id}: Loading model...")
+    if model_pretrained:
+        model = KimiAudio(
+            model_path=model_path,
+            load_detokenizer=True,
+        )
+    else:
+        model = KimiAudio(model_path=model_path, load_detokenizer=False)
+    print(f"GPU {gpu_id}: Model loaded successfully!")
+    
+    # 处理任务
+    while True:
+        try:
+            # 获取任务（超时1秒）
+            task = task_queue.get(timeout=1)
+            
+            if task is None:  # 结束信号
+                break
+            
+            idx, item = task
+            conversation = item['conversation']
+            audio_path, groundtruth = extract_audio_info(conversation)
+            
+            if audio_path is None or groundtruth is None:
+                result = {
+                    "index": idx,
+                    "audio_path": audio_path,
+                    "groundtruth": groundtruth,
+                    "model_output": "ERROR: Missing audio path or groundtruth",
+                    "error": True,
+                    "gpu_id": gpu_id
+                }
+            elif not os.path.exists(audio_path):
+                result = {
+                    "index": idx,
+                    "audio_path": audio_path,
+                    "groundtruth": groundtruth,
+                    "model_output": "ERROR: Audio file not found",
+                    "error": True,
+                    "gpu_id": gpu_id
+                }
+            else:
+                try:
+                    # 构建消息格式
+                    messages = [
+                        {"role": "user", "message_type": "text", "content": "请将音频内容转换为文字。"},
+                        {"role": "user", "message_type": "audio", "content": audio_path},
+                    ]
+                    
+                    # 生成结果
+                    start_time = time.time()
+                    wav, text = model.generate(messages, **sampling_params, output_type="text")
+                    inference_time = time.time() - start_time
+                    
+                    result = {
+                        "index": idx,
+                        "audio_path": audio_path,
+                        "groundtruth": groundtruth,
+                        "model_output": text,
+                        "inference_time": inference_time,
+                        "error": False,
+                        "gpu_id": gpu_id
+                    }
+                except Exception as e:
+                    result = {
+                        "index": idx,
+                        "audio_path": audio_path,
+                        "groundtruth": groundtruth,
+                        "model_output": f"ERROR: {str(e)}",
+                        "error": True,
+                        "gpu_id": gpu_id
+                    }
+            
+            # 发送结果
+            result_queue.put(result)
+            
+        except Empty:
+            # 队列为空，继续等待
+            continue
+        except Exception as e:
+            print(f"GPU {gpu_id}: Error in worker process: {str(e)}")
+
 def main(model_pretrained=True):
+    # 检测可用的GPU数量
+    num_gpus = torch.cuda.device_count()
+    if num_gpus == 0:
+        print("No GPU available! Please check your CUDA installation.")
+        return
+    
+    print(f"Found {num_gpus} GPUs")
+    
     # 模型路径和参数配置
     if model_pretrained:
         model_path = "moonshotai/Kimi-Audio-7B-Instruct"
@@ -37,17 +131,6 @@ def main(model_pretrained=True):
         model_path = "output/finetuned_hf_for_inference"
     jsonl_path = "finetune_codes/demo_data/audio_understanding/asr_sft_data.jsonl"
     output_file = "batch_inference_results.json"
-    
-    # 只加载一次模型
-    if model_pretrained:
-        model = KimiAudio(
-            model_path=model_path,
-            load_detokenizer=True,
-        )
-    else:
-        print(f"Loading model from {model_path}...")
-        model = KimiAudio(model_path=model_path, load_detokenizer=False)
-    print("Model loaded successfully!")
     
     # 采样参数
     sampling_params = {
@@ -66,68 +149,56 @@ def main(model_pretrained=True):
     data = load_jsonl_data(jsonl_path)
     print(f"Loaded {len(data)} samples")
     
-    # 批量推理
+    # 创建任务队列和结果队列
+    manager = Manager()
+    task_queue = manager.Queue()
+    result_queue = manager.Queue()
+    
+    # 将所有任务放入队列
+    for idx, item in enumerate(data):
+        task_queue.put((idx, item))
+    
+    # 添加结束信号
+    for _ in range(num_gpus):
+        task_queue.put(None)
+    
+    # 启动工作进程
+    processes = []
+    for gpu_id in range(num_gpus):
+        p = Process(
+            target=worker_process,
+            args=(gpu_id, task_queue, result_queue, model_path, model_pretrained, sampling_params)
+        )
+        p.start()
+        processes.append(p)
+    
+    # 收集结果
+    print("\nProcessing samples on multiple GPUs...")
     results = []
-    for idx, item in enumerate(tqdm(data, desc="Processing samples")):
-        conversation = item['conversation']
-        audio_path, groundtruth = extract_audio_info(conversation)
-        
-        if audio_path is None or groundtruth is None:
-            print(f"Warning: Skipping sample {idx} due to missing audio path or groundtruth")
-            continue
-        
-        # 检查音频文件是否存在
-        if not os.path.exists(audio_path):
-            print(f"Warning: Audio file not found: {audio_path}")
-            results.append({
-                "index": idx,
-                "audio_path": audio_path,
-                "groundtruth": groundtruth,
-                "model_output": "ERROR: Audio file not found",
-                "error": True
-            })
-            continue
-        
-        try:
-            # 构建消息格式
-            messages = [
-                {"role": "user", "message_type": "text", "content": "Please transcribe the spoken content into written text."},
-                {"role": "user", "message_type": "audio", "content": audio_path},
-            ]
-            
-            # 生成结果
-            start_time = time.time()
-            wav, text = model.generate(messages, **sampling_params, output_type="text")
-            inference_time = time.time() - start_time
-            
-            # 保存结果
-            result = {
-                "index": idx,
-                "audio_path": audio_path,
-                "groundtruth": groundtruth,
-                "model_output": text,
-                "inference_time": inference_time,
-                "error": False
-            }
+    start_time = time.time()
+    
+    with tqdm(total=len(data), desc="Processing samples") as pbar:
+        for _ in range(len(data)):
+            result = result_queue.get()
             results.append(result)
+            pbar.update(1)
             
-            # 可选：打印当前结果
-            if (idx + 1) % 10 == 0:  # 每10个样本打印一次
-                print(f"\nSample {idx + 1}:")
-                print(f"  Audio: {os.path.basename(audio_path)}")
-                print(f"  GT: {groundtruth[:50]}...")
-                print(f"  Output: {text[:50]}...")
-                print(f"  Time: {inference_time:.2f}s")
-                
-        except Exception as e:
-            print(f"Error processing sample {idx}: {str(e)}")
-            results.append({
-                "index": idx,
-                "audio_path": audio_path,
-                "groundtruth": groundtruth,
-                "model_output": f"ERROR: {str(e)}",
-                "error": True
-            })
+            # 实时显示进度
+            if len(results) % 10 == 0:
+                gpu_usage = {}
+                for r in results:
+                    gpu_id = r.get('gpu_id', -1)
+                    gpu_usage[gpu_id] = gpu_usage.get(gpu_id, 0) + 1
+                pbar.set_postfix({f"GPU{k}": v for k, v in sorted(gpu_usage.items())})
+    
+    # 等待所有进程完成
+    for p in processes:
+        p.join()
+    
+    total_time = time.time() - start_time
+    
+    # 按原始索引排序结果
+    results.sort(key=lambda x: x['index'])
     
     # 保存结果到JSON文件
     print(f"\nSaving results to {output_file}...")
@@ -142,17 +213,39 @@ def main(model_pretrained=True):
     print(f"Total samples: {len(results)}")
     print(f"Successful: {len(successful_results)}")
     print(f"Failed: {len(failed_results)}")
+    print(f"Total processing time: {total_time:.2f}s")
+    print(f"Speedup: {len(results)/total_time:.2f} samples/s")
     
     if successful_results:
-        avg_time = sum(r['inference_time'] for r in successful_results) / len(successful_results)
-        print(f"Average inference time: {avg_time:.2f}s")
+        avg_inference_time = sum(r['inference_time'] for r in successful_results) / len(successful_results)
+        print(f"Average inference time per sample: {avg_inference_time:.2f}s")
     
-    # 可选：计算简单的准确率（基于完全匹配）
+    # GPU使用统计
+    gpu_stats = {}
+    for result in results:
+        gpu_id = result.get('gpu_id', -1)
+        if gpu_id not in gpu_stats:
+            gpu_stats[gpu_id] = {'total': 0, 'successful': 0, 'failed': 0, 'total_time': 0}
+        gpu_stats[gpu_id]['total'] += 1
+        if result.get('error', False):
+            gpu_stats[gpu_id]['failed'] += 1
+        else:
+            gpu_stats[gpu_id]['successful'] += 1
+            gpu_stats[gpu_id]['total_time'] += result.get('inference_time', 0)
+    
+    print("\nGPU Usage Statistics:")
+    for gpu_id in sorted(gpu_stats.keys()):
+        stats = gpu_stats[gpu_id]
+        avg_time = stats['total_time'] / stats['successful'] if stats['successful'] > 0 else 0
+        print(f"  GPU {gpu_id}: {stats['total']} total, {stats['successful']} successful, "
+              f"{stats['failed']} failed, avg time: {avg_time:.2f}s")
+    
+    # 计算简单的准确率（基于完全匹配）
     exact_matches = sum(1 for r in successful_results if r['model_output'].strip() == r['groundtruth'].strip())
     if successful_results:
-        print(f"Exact match accuracy: {exact_matches}/{len(successful_results)} ({exact_matches/len(successful_results)*100:.2f}%)")
+        print(f"\nExact match accuracy: {exact_matches}/{len(successful_results)} ({exact_matches/len(successful_results)*100:.2f}%)")
     
-    # 可选：保存错误样本到单独文件
+    # 保存错误样本到单独文件
     if failed_results:
         with open("failed_samples.json", 'w', encoding='utf-8') as f:
             json.dump(failed_results, f, ensure_ascii=False, indent=2)
@@ -161,4 +254,23 @@ def main(model_pretrained=True):
     print("\nBatch inference completed!")
 
 if __name__ == "__main__":
-    main(True)
+    import sys
+    import multiprocessing
+    
+    # 设置启动方法为spawn，避免CUDA fork问题
+    multiprocessing.set_start_method('spawn', force=True)
+    
+    # 支持命令行参数：python script.py [model_pretrained] [num_gpus]
+    model_pretrained = True
+    num_gpus_limit = None
+    
+    if len(sys.argv) > 1:
+        model_pretrained = sys.argv[1].lower() == 'true'
+    if len(sys.argv) > 2:
+        num_gpus_limit = int(sys.argv[2])
+    
+    # 如果指定了GPU数量限制，设置环境变量
+    if num_gpus_limit:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(i) for i in range(num_gpus_limit))
+    
+    main(model_pretrained)
