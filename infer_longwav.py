@@ -28,13 +28,17 @@ class AudioSegmenter:
     def load_vad_model(self):
         """加载Silero VAD模型"""
         print("Loading Silero VAD model...")
-        self.vad_model, self.utils = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad',
-            model='silero_vad',
-            force_reload=False,
-            verbose=False
-        )
+        vad_model_dir = '/opt/data/nvme4/kimi/data/models/silero_vad'
+        vad_model_path = os.path.join(vad_model_dir, "silero_vad.jit")
+        
+        if not os.path.exists(vad_model_path):
+            raise FileNotFoundError(f"VAD model not found at {vad_model_path}. Please download it first.")
+        
+        # 加载模型
+        self.vad_model, self.utils = torch.jit.load(vad_model_path, map_location='cpu')
+        self.vad_model.eval()
         print("VAD model loaded successfully!")
+        #git clone https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.jit
         
     def load_audio(self, audio_path: str) -> Tuple[torch.Tensor, int]:
         """加载音频文件并重采样"""
