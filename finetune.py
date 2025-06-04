@@ -28,7 +28,7 @@ IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="moonshotai/Kimi-Audio-7B")
+    model_name_or_path: Optional[str] = field(default="moonshotai/Kimi-Audio-7B-Instruct")
     model_path: str = field(
         default=None, metadata={"help": "Path to the pretrained model."}
     )
