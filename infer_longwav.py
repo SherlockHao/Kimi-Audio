@@ -24,6 +24,108 @@ class AudioSegmenter:
         self.sample_rate = sample_rate
         self.vad_model = None
         self.utils = None
+
+    def load_silero_vad_offline(self,model_dir="./vad_model"):
+        """从本地文件加载VAD模型"""
+        model_path = os.path.join(model_dir, "silero_vad.jit")
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"VAD model not found at {model_path}. Please download it first.")
+        
+        # 加载模型
+        model = torch.jit.load(model_path, map_location='cpu')
+        model.eval()
+        
+        # 定义工具函数
+        def get_speech_timestamps(audio, model, sampling_rate=16000, 
+                                threshold=0.5, min_speech_duration_ms=250, 
+                                min_silence_duration_ms=100):
+            """获取语音时间戳"""
+            model.reset_states()
+            
+            # 确保音频是正确的格式
+            if audio.dim() == 1:
+                audio = audio.unsqueeze(0)
+            
+            # 窗口大小
+            window_size_samples = 512
+            
+            speech_probs = []
+            for i in range(0, audio.shape[1], window_size_samples):
+                chunk = audio[:, i:i+window_size_samples]
+                if chunk.shape[1] < window_size_samples:
+                    chunk = torch.nn.functional.pad(chunk, (0, window_size_samples - chunk.shape[1]))
+                
+                with torch.no_grad():
+                    speech_prob = model(chunk, sampling_rate).item()
+                speech_probs.append(speech_prob)
+            
+            # 转换为时间戳
+            timestamps = []
+            in_speech = False
+            speech_start = None
+            
+            min_speech_samples = int(min_speech_duration_ms * sampling_rate / 1000)
+            min_silence_samples = int(min_silence_duration_ms * sampling_rate / 1000)
+            
+            for i, prob in enumerate(speech_probs):
+                if prob >= threshold and not in_speech:
+                    in_speech = True
+                    speech_start = i * window_size_samples
+                elif prob < threshold and in_speech:
+                    in_speech = False
+                    speech_end = i * window_size_samples
+                    
+                    # 检查最小语音长度
+                    if speech_end - speech_start >= min_speech_samples:
+                        timestamps.append({
+                            'start': speech_start,
+                            'end': speech_end
+                        })
+            
+            # 处理最后一段
+            if in_speech:
+                timestamps.append({
+                    'start': speech_start,
+                    'end': len(speech_probs) * window_size_samples
+                })
+            
+            return timestamps
+        
+        def read_audio(path, sampling_rate=16000):
+            """读取音频文件"""
+            wav, sr = torchaudio.load(path)
+            
+            if wav.shape[0] > 1:
+                wav = wav.mean(dim=0, keepdim=True)
+            
+            if sr != sampling_rate:
+                wav = torchaudio.functional.resample(wav, sr, sampling_rate)
+            
+            return wav.squeeze()
+        
+        def save_audio(path, tensor, sampling_rate=16000):
+            """保存音频文件"""
+            torchaudio.save(path, tensor.unsqueeze(0), sampling_rate)
+        
+        def collect_chunks(timestamps, audio):
+            """收集音频片段"""
+            chunks = []
+            for ts in timestamps:
+                chunk = audio[ts['start']:ts['end']]
+                chunks.append(chunk)
+            return torch.cat(chunks) if chunks else torch.tensor([])
+        
+        # 模拟 torch.hub 返回的 utils
+        utils = (
+            get_speech_timestamps,
+            save_audio,
+            read_audio,
+            lambda: None,  # VADIterator placeholder
+            collect_chunks
+        )
+        
+        return model, utils
         
     def load_vad_model(self):
         """加载Silero VAD模型"""
@@ -35,10 +137,9 @@ class AudioSegmenter:
             raise FileNotFoundError(f"VAD model not found at {vad_model_path}. Please download it first.")
         
         # 加载模型
-        self.vad_model, self.utils = torch.jit.load(vad_model_path, map_location='cpu')
+        self.vad_model, self.utils = self.load_silero_vad_offline(vad_model_dir)
         self.vad_model.eval()
         print("VAD model loaded successfully!")
-        #git clone https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.jit
         
     def load_audio(self, audio_path: str) -> Tuple[torch.Tensor, int]:
         """加载音频文件并重采样"""
