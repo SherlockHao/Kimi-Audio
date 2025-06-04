@@ -92,19 +92,19 @@ torchrun $DISTRIBUTED_ARGS finetune.py \
     --eval_ratio 0.05 \
     --bf16 True \
     --output_dir output/kimiaudio_ckpts \
-    --num_train_epochs 3 \
+    --num_train_epochs 2 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --gradient_accumulation_steps 16 \
     --save_strategy "steps" \
-    --save_steps 200 \
+    --save_steps 300 \
     --save_total_limit 10 \
-    --learning_rate 2e-5 \
+    --learning_rate 5e-6 \
     --weight_decay 0.1 \
     --adam_beta2 0.95 \
-    --warmup_ratio 0.03 \
+    --warmup_ratio 0.02 \
     --lr_scheduler_type "cosine" \
-    --logging_steps 10 \
+    --logging_steps 20 \
     --report_to "none" \
     --model_max_length 512 \
     --gradient_checkpointing True \
