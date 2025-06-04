@@ -349,7 +349,7 @@ def main():
         "text_top_k": 5,
         "audio_repetition_penalty": 1.0,
         "audio_repetition_window_size": 64,
-        "text_repetition_penalty": 1.2,
+        "text_repetition_penalty": 1.3,
         "text_repetition_window_size": 16,
     }
     
