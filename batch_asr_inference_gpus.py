@@ -129,8 +129,8 @@ def main(model_pretrained=True):
         model_path = "moonshotai/Kimi-Audio-7B-Instruct"
     else:
         model_path = "output/finetuned_hf_for_inference"
-    jsonl_path = "finetune_codes/demo_data/audio_understanding/asr_sft_data.jsonl"
-    output_file = "batch_inference_results.json"
+    jsonl_path = "/opt/data/nvme4/kimi/data/test2/asr_sft_data_0604.jsonl"
+    output_file = "/opt/data/nvme4/kimi/data/output/batch_inference_results.json"
     
     # 采样参数
     sampling_params = {
