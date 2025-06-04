@@ -321,7 +321,7 @@ def process_with_kimi(model, segment: Dict, sampling_params: Dict) -> Dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Kimi Audio inference with VAD-based splitting")
-    parser.add_argument("--model_path", type=str, default="moonshotai/Kimi-Audio-7B")
+    parser.add_argument("--model_path", type=str, default="moonshotai/Kimi-Audio-7B-Instruct")
     parser.add_argument("--audio_path", type=str, required=True, help="Path to the audio file")
     parser.add_argument("--output_path", type=str, default="/opt/data/nvme4/kimi/data/output/output_vad_result.json", help="Path to save the output")
     parser.add_argument("--target_duration", type=float, default=30, help="Target duration for each segment (seconds)")
@@ -349,7 +349,7 @@ def main():
         "text_top_k": 5,
         "audio_repetition_penalty": 1.0,
         "audio_repetition_window_size": 64,
-        "text_repetition_penalty": 1.0,
+        "text_repetition_penalty": 1.2,
         "text_repetition_window_size": 16,
     }
     
