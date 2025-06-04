@@ -41,7 +41,8 @@ class AudioSegmenter:
         print(f"Loading audio file: {audio_path}")
         
         # 使用librosa加载音频，支持更多格式
-        audio, orig_sr = librosa.load(audio_path, sr=None, mono=True)
+        # audio, orig_sr = librosa.load(audio_path, sr=None, mono=True)
+        audio, orig_sr = sf.read(audio_path)
         
         # 如果需要重采样
         if orig_sr != self.sample_rate:
