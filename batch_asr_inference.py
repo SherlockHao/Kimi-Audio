@@ -65,6 +65,7 @@ def main(model_pretrained=True):
     for idx, item in enumerate(tqdm(data, desc="Processing samples")):
         conversation = item['conversation']
         audio_path, groundtruth = extract_audio_info(conversation)
+        term = item['term']
         
         if audio_path is None or groundtruth is None:
             print(f"Warning: Skipping sample {idx} due to missing audio path or groundtruth")
@@ -98,6 +99,7 @@ def main(model_pretrained=True):
             result = {
                 "index": idx,
                 "audio_path": audio_path,
+                "term": term,
                 "groundtruth": groundtruth,
                 "model_output": text,
                 "inference_time": inference_time,
