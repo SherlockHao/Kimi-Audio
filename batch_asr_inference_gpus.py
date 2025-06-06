@@ -55,6 +55,7 @@ def worker_process(gpu_id, task_queue, result_queue, model_path, model_pretraine
             idx, item = task
             conversation = item['conversation']
             audio_path, groundtruth = extract_audio_info(conversation)
+            term = item['term']
             
             if audio_path is None or groundtruth is None:
                 result = {
@@ -90,6 +91,7 @@ def worker_process(gpu_id, task_queue, result_queue, model_path, model_pretraine
                     result = {
                         "index": idx,
                         "audio_path": audio_path,
+                        "term": term,
                         "groundtruth": groundtruth,
                         "model_output": text,
                         "inference_time": inference_time,
@@ -129,8 +131,8 @@ def main(model_pretrained=True):
         model_path = "moonshotai/Kimi-Audio-7B-Instruct"
     else:
         model_path = "output/finetuned_hf_for_inference"
-    jsonl_path = "/opt/data/nvme4/kimi/data/test2/asr_sft_data_0604.jsonl"
-    output_file = "/opt/data/nvme4/kimi/data/output/batch_inference_results.json"
+    jsonl_path = "/opt/data/nvme4/kimi/data/testset0605/audio_data.jsonl"
+    output_file = "testset0605_kimi_original.json"
     
     # 采样参数
     sampling_params = {
